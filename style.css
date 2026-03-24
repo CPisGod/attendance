@@ -294,8 +294,11 @@ input::placeholder { color: var(--text-muted); }
   letter-spacing: 0.06em;
 }
 
-.code-edit-row { display: flex; gap: 8px; }
-.code-edit-row input { flex: 1; }
+.code-edit-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
 .member-add-row { display: flex; gap: 8px; }
 .member-add-row input { flex: 1; }
