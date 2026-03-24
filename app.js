@@ -56,6 +56,13 @@ const statPresent        = document.getElementById("stat-present");
 const statAbsent         = document.getElementById("stat-absent");
 const btnResetAttendance = document.getElementById("btn-reset-attendance");
 const filterTabs         = document.querySelectorAll(".filter-tab");
+const dailyMessageBox    = document.getElementById("daily-message-box");
+const dailyMessageText   = document.getElementById("daily-message-text");
+const currentMsgDisplay  = document.getElementById("current-message-display");
+const newMessageInput    = document.getElementById("new-message-input");
+const btnSaveMessage     = document.getElementById("btn-save-message");
+const btnClearMessage    = document.getElementById("btn-clear-message");
+const messageMsg         = document.getElementById("message-msg");
 
 // ── 초기 설정 ─────────────────────────────────────────────
 async function ensureSettings() {
@@ -67,6 +74,24 @@ async function ensureSettings() {
   } catch (err) { console.error("ensureSettings:", err); }
 }
 ensureSettings();
+
+// ── 일반 사용자 화면 — 한마디 로드 ────────────────────────
+loadDailyMessage();
+
+async function loadDailyMessage() {
+  try {
+    const snap = await getDoc(SETTINGS_REF);
+    if (snap.exists()) {
+      const msg = snap.data().dailyMessage || "";
+      if (msg.trim()) {
+        dailyMessageText.textContent = msg;
+        dailyMessageBox.classList.remove("hidden");
+      } else {
+        dailyMessageBox.classList.add("hidden");
+      }
+    }
+  } catch (err) { console.error("loadDailyMessage:", err); }
+}
 
 // ============================================================
 //  필터 탭
@@ -176,7 +201,12 @@ btnLogout.addEventListener("click", switchToUser);
 async function loadAdminData() {
   try {
     const snap = await getDoc(SETTINGS_REF);
-    if (snap.exists()) currentCodeDisplay.textContent = snap.data().attendanceCode || "—";
+    if (snap.exists()) {
+      currentCodeDisplay.textContent = snap.data().attendanceCode || "—";
+      const msg = snap.data().dailyMessage || "";
+      currentMsgDisplay.textContent = msg.trim() ? msg : "설정된 메시지 없음";
+      newMessageInput.value = msg;
+    }
   } catch (err) { console.error(err); }
 }
 
@@ -197,6 +227,33 @@ btnSaveCode.addEventListener("click", async () => {
   }
 });
 newCodeInput.addEventListener("keydown", e => { if (e.key === "Enter") btnSaveCode.click(); });
+
+// ============================================================
+//  어드민 — 한마디 저장
+// ============================================================
+btnSaveMessage.addEventListener("click", async () => {
+  const msg = newMessageInput.value.trim();
+  try {
+    await updateDoc(SETTINGS_REF, { dailyMessage: msg });
+    currentMsgDisplay.textContent = msg || "설정된 메시지 없음";
+    showMsg(messageMsg, "한마디가 저장되었습니다.", "success");
+  } catch (err) {
+    console.error(err);
+    showMsg(messageMsg, "저장 중 오류가 발생했습니다.", "error");
+  }
+});
+
+btnClearMessage.addEventListener("click", async () => {
+  try {
+    await updateDoc(SETTINGS_REF, { dailyMessage: "" });
+    newMessageInput.value = "";
+    currentMsgDisplay.textContent = "설정된 메시지 없음";
+    showMsg(messageMsg, "한마디가 지워졌습니다.", "info");
+  } catch (err) {
+    console.error(err);
+    showMsg(messageMsg, "오류가 발생했습니다.", "error");
+  }
+});
 
 // ============================================================
 //  어드민 — 인원 추가 (order 필드 포함)
