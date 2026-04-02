@@ -64,6 +64,11 @@ const newMessageInput    = document.getElementById("new-message-input");
 const btnSaveMessage     = document.getElementById("btn-save-message");
 const btnClearMessage    = document.getElementById("btn-clear-message");
 const messageMsg         = document.getElementById("message-msg");
+const weeklyThead        = document.getElementById("weekly-thead");
+const weeklyTbody        = document.getElementById("weekly-tbody");
+const weekLabel          = document.getElementById("week-label");
+const btnWeekPrev        = document.getElementById("btn-week-prev");
+const btnWeekNext        = document.getElementById("btn-week-next");
 
 // ── 초기 설정 ─────────────────────────────────────────────
 async function ensureSettings() {
@@ -200,6 +205,7 @@ function switchToAdmin() {
   adminScreen.classList.remove("hidden"); adminScreen.classList.add("active");
   loadAdminData();
   startMembersListener();
+  initWeeklyTable();
 }
 
 function switchToUser() {
@@ -576,4 +582,114 @@ function showMsg(el, text, type = "info") {
   el.classList.remove("hidden");
   clearTimeout(el._timer);
   el._timer = setTimeout(() => el.classList.add("hidden"), 3500);
+}
+
+// ============================================================
+//  주간 출석표
+// ============================================================
+let weekOffset = 0; // 0 = 이번주, -1 = 지난주, ...
+
+function getWeekDays(offset = 0) {
+  // 이번 주 월~금 날짜 배열 반환
+  const now = new Date();
+  const day = now.getDay(); // 0=일, 1=월 ...
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1) + offset * 7);
+  monday.setHours(0, 0, 0, 0);
+
+  return Array.from({ length: 5 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return d;
+  });
+}
+
+function dateKey(date) {
+  // "YYYY-MM-DD"
+  const pad = n => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}`;
+}
+
+function initWeeklyTable() {
+  weekOffset = 0;
+  renderWeeklyTable();
+
+  btnWeekPrev.onclick = () => { weekOffset--; renderWeeklyTable(); };
+  btnWeekNext.onclick = () => { weekOffset++; renderWeeklyTable(); };
+}
+
+async function renderWeeklyTable() {
+  const days = getWeekDays(weekOffset);
+  const todayKey = dateKey(new Date());
+  const DAY_KO = ["월", "화", "수", "목", "금"];
+
+  // 주간 레이블
+  const s = days[0], e = days[4];
+  const pad = n => String(n).padStart(2, "0");
+  weekLabel.textContent =
+    `${s.getFullYear()}.${pad(s.getMonth()+1)}.${pad(s.getDate())} ~ ${pad(e.getMonth()+1)}.${pad(e.getDate())}`;
+
+  // 헤더
+  weeklyThead.innerHTML = `<tr>
+    <th class="col-name">이름</th>
+    ${days.map((d, i) => {
+      const dk = dateKey(d);
+      const isToday = dk === todayKey;
+      return `<th class="${isToday ? "th-today" : ""}">
+        ${DAY_KO[i]}<br>
+        <span style="font-weight:400;font-size:0.7rem">${pad(d.getMonth()+1)}/${pad(d.getDate())}</span>
+      </th>`;
+    }).join("")}
+    <th class="col-count">출석수</th>
+  </tr>`;
+
+  // 멤버 없을 때
+  if (cachedMembers.length === 0) {
+    weeklyTbody.innerHTML = `<tr><td colspan="7" class="weekly-empty">등록된 인원이 없습니다.</td></tr>`;
+    return;
+  }
+
+  // 모든 멤버의 이번 주 로그 병렬 조회
+  const sorted = [...cachedMembers].sort((a, b) => {
+    const ao = a.order ?? 999, bo = b.order ?? 999;
+    return ao !== bo ? ao - bo : a.name.localeCompare(b.name, "ko");
+  });
+
+  weeklyTbody.innerHTML = `<tr><td colspan="7" class="weekly-empty">불러오는 중…</td></tr>`;
+
+  const memberLogs = await Promise.all(sorted.map(async m => {
+    try {
+      const logsCol = collection(db, "members", m.id, "attendance_logs");
+      const snap = await getDocs(logsCol);
+      // dateKey별로 Set에 저장 (같은 날 중복 출석은 O 하나로)
+      const presentDays = new Set(
+        snap.docs.map(d => {
+          const iso = d.data().attendedAt;
+          return iso ? dateKey(new Date(iso)) : null;
+        }).filter(Boolean)
+      );
+      return { ...m, presentDays };
+    } catch {
+      return { ...m, presentDays: new Set() };
+    }
+  }));
+
+  weeklyTbody.innerHTML = memberLogs.map(m => {
+    let count = 0;
+    const cells = days.map(d => {
+      const dk = dateKey(d);
+      const isToday = dk === todayKey;
+      const present = m.presentDays.has(dk);
+      if (present) count++;
+      return `<td class="${isToday ? "col-today" : ""}">
+        <span class="${present ? "att-o" : "att-x"}">${present ? "O" : "X"}</span>
+      </td>`;
+    }).join("");
+
+    return `<tr>
+      <td class="col-name">${m.name}</td>
+      ${cells}
+      <td class="col-count">${count} / 5</td>
+    </tr>`;
+  }).join("");
 }
