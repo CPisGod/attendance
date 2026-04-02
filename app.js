@@ -317,8 +317,87 @@ btnResetAttendance.addEventListener("click", async () => {
 });
 
 // ============================================================
-//  어드민 — 인원 삭제
+//  어드민 — 오늘 출석 토글 (출석현황 뱃지 클릭)
 // ============================================================
+async function toggleTodayAttendance(memberId, isCurrentlyPresent) {
+  const todayKey = dateKey(new Date());
+  try {
+    if (isCurrentlyPresent) {
+      // 출석 → 미출석: present=false, 오늘 날짜 로그 삭제
+      await updateDoc(doc(db, "members", memberId), { present: false, attendedAt: null });
+      // 오늘 날짜 로그 찾아서 삭제
+      const logsCol = collection(db, "members", memberId, "attendance_logs");
+      const snap = await getDocs(logsCol);
+      const toDelete = snap.docs.filter(d => {
+        const iso = d.data().attendedAt;
+        return iso && dateKey(new Date(iso)) === todayKey;
+      });
+      await Promise.all(toDelete.map(d => deleteDoc(doc(db, "members", memberId, "attendance_logs", d.id))));
+    } else {
+      // 미출석 → 출석: present=true, 로그 추가
+      const now = new Date();
+      await updateDoc(doc(db, "members", memberId), {
+        present: true,
+        attendedAt: now.toISOString()
+      });
+      await addDoc(collection(db, "members", memberId, "attendance_logs"), {
+        attendedAt: now.toISOString(),
+        year: now.getFullYear(), month: now.getMonth()+1, day: now.getDate(),
+        hour: now.getHours(), minute: now.getMinutes(), second: now.getSeconds(),
+        label: formatDateTime(now)
+      });
+    }
+    renderWeeklyTable();
+  } catch (err) {
+    console.error("toggleTodayAttendance:", err);
+  }
+}
+
+// ============================================================
+//  어드민 — 주간표 특정 날짜 O/X 토글
+// ============================================================
+async function toggleWeeklyDay(memberId, memberName, dk, isCurrentlyPresent) {
+  try {
+    const logsCol = collection(db, "members", memberId, "attendance_logs");
+
+    if (isCurrentlyPresent) {
+      // O → X: 해당 날짜 로그 모두 삭제
+      const snap = await getDocs(logsCol);
+      const toDelete = snap.docs.filter(d => {
+        const iso = d.data().attendedAt;
+        return iso && dateKey(new Date(iso)) === dk;
+      });
+      await Promise.all(toDelete.map(d => deleteDoc(doc(db, "members", memberId, "attendance_logs", d.id))));
+
+      // 오늘 날짜라면 present도 false로
+      if (dk === dateKey(new Date())) {
+        await updateDoc(doc(db, "members", memberId), { present: false, attendedAt: null });
+      }
+    } else {
+      // X → O: 해당 날짜 로그 추가
+      // dk = "YYYY-MM-DD" 기준으로 정오 시간 저장
+      const [y, mo, d] = dk.split("-").map(Number);
+      const logDate = new Date(y, mo - 1, d, 12, 0, 0);
+      await addDoc(logsCol, {
+        attendedAt: logDate.toISOString(),
+        year: y, month: mo, day: d,
+        hour: 12, minute: 0, second: 0,
+        label: formatDateTime(logDate)
+      });
+
+      // 오늘 날짜라면 present도 true로
+      if (dk === dateKey(new Date())) {
+        await updateDoc(doc(db, "members", memberId), {
+          present: true,
+          attendedAt: logDate.toISOString()
+        });
+      }
+    }
+    renderWeeklyTable();
+  } catch (err) {
+    console.error("toggleWeeklyDay:", err);
+  }
+}
 async function deleteMember(id, name) {
   if (!confirm(`"${name}" 님을 목록에서 삭제할까요?`)) return;
   try {
@@ -397,7 +476,10 @@ function renderMemberList(members) {
         <span class="member-name">${m.name}</span>
       </div>
       <div class="member-actions">
-        <span class="member-badge ${m.present ? "present" : "absent"}">${m.present ? "출석" : "미출석"}</span>
+        <span class="member-badge ${m.present ? "present" : "absent"} badge-toggle"
+              data-toggle-id="${m.id}"
+              data-toggle-present="${m.present}"
+              title="클릭하여 출석 상태 변경">${m.present ? "출석 ✓" : "미출석"}</span>
         <button class="btn-icon btn-info-icon" data-info-id="${m.id}" data-info-name="${m.name}" title="출석 기록">📋</button>
         <button class="btn-icon" data-delete="${m.id}" data-name="${m.name}" title="삭제">✕</button>
       </div>
@@ -407,6 +489,14 @@ function renderMemberList(members) {
   // 삭제 이벤트
   memberList.querySelectorAll("[data-delete]").forEach(btn => {
     btn.addEventListener("click", () => deleteMember(btn.dataset.delete, btn.dataset.name));
+  });
+
+  // 출석 토글 뱃지
+  memberList.querySelectorAll(".badge-toggle").forEach(badge => {
+    badge.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleTodayAttendance(badge.dataset.toggleId, badge.dataset.togglePresent === "true");
+    });
   });
 
   // 출석 기록 모달
@@ -684,7 +774,12 @@ async function renderWeeklyTable() {
         const present = m.presentDays.has(dk);
         if (present) count++;
         return `<td class="${isToday ? "col-today" : ""}">
-          <span class="${present ? "att-o" : "att-x"}">${present ? "O" : "X"}</span>
+          <span class="${present ? "att-o" : "att-x"} att-toggle"
+                data-member-id="${m.id}"
+                data-member-name="${m.name}"
+                data-date-key="${dk}"
+                data-present="${present}"
+                title="클릭하여 출석 변경">${present ? "O" : "X"}</span>
         </td>`;
       }).join("");
 
@@ -694,6 +789,18 @@ async function renderWeeklyTable() {
         <td class="col-count">${count} / 5</td>
       </tr>`;
     }).join("");
+
+    // O/X 토글 이벤트
+    weeklyTbody.querySelectorAll(".att-toggle").forEach(el => {
+      el.addEventListener("click", () => {
+        toggleWeeklyDay(
+          el.dataset.memberId,
+          el.dataset.memberName,
+          el.dataset.dateKey,
+          el.dataset.present === "true"
+        );
+      });
+    });
 
   } catch (err) {
     console.error("renderWeeklyTable 전체 오류:", err);

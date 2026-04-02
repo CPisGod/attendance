@@ -714,7 +714,11 @@ textarea::placeholder { color: var(--text-muted); }
   color: #065f46;
   font-weight: 700;
   font-size: 0.78rem;
+  cursor: pointer;
+  transition: all var(--transition);
 }
+
+.att-o:hover { filter: brightness(0.93); transform: scale(1.1); }
 
 .att-x {
   display: inline-flex;
@@ -727,7 +731,18 @@ textarea::placeholder { color: var(--text-muted); }
   color: var(--text-muted);
   font-weight: 700;
   font-size: 0.78rem;
+  cursor: pointer;
+  transition: all var(--transition);
 }
+
+.att-x:hover { border-color: #6ee7b7; color: #065f46; transform: scale(1.1); }
+
+.badge-toggle {
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.badge-toggle:hover { filter: brightness(0.92); transform: scale(1.04); }
 
 .col-today { background: rgba(59,130,246,0.05); }
 .th-today  { background: var(--accent-light) !important; color: var(--accent) !important; }
