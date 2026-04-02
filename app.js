@@ -353,6 +353,8 @@ function startMembersListener() {
     cachedMembers = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
     renderMemberList(cachedMembers);
     updateStats(cachedMembers);
+    // 멤버 데이터가 들어오면 주간 테이블도 갱신
+    renderWeeklyTable();
   }, err => console.error("Members listener:", err));
 }
 
@@ -622,19 +624,18 @@ async function renderWeeklyTable() {
   const days = getWeekDays(weekOffset);
   const todayKey = dateKey(new Date());
   const DAY_KO = ["월", "화", "수", "목", "금"];
+  const pad = n => String(n).padStart(2, "0");
 
   // 주간 레이블
   const s = days[0], e = days[4];
-  const pad = n => String(n).padStart(2, "0");
   weekLabel.textContent =
     `${s.getFullYear()}.${pad(s.getMonth()+1)}.${pad(s.getDate())} ~ ${pad(e.getMonth()+1)}.${pad(e.getDate())}`;
 
-  // 헤더
+  // 헤더 렌더
   weeklyThead.innerHTML = `<tr>
     <th class="col-name">이름</th>
     ${days.map((d, i) => {
-      const dk = dateKey(d);
-      const isToday = dk === todayKey;
+      const isToday = dateKey(d) === todayKey;
       return `<th class="${isToday ? "th-today" : ""}">
         ${DAY_KO[i]}<br>
         <span style="font-weight:400;font-size:0.7rem">${pad(d.getMonth()+1)}/${pad(d.getDate())}</span>
@@ -644,52 +645,58 @@ async function renderWeeklyTable() {
   </tr>`;
 
   // 멤버 없을 때
-  if (cachedMembers.length === 0) {
+  if (!cachedMembers || cachedMembers.length === 0) {
     weeklyTbody.innerHTML = `<tr><td colspan="7" class="weekly-empty">등록된 인원이 없습니다.</td></tr>`;
     return;
   }
 
-  // 모든 멤버의 이번 주 로그 병렬 조회
+  weeklyTbody.innerHTML = `<tr><td colspan="7" class="weekly-empty">불러오는 중…</td></tr>`;
+
   const sorted = [...cachedMembers].sort((a, b) => {
     const ao = a.order ?? 999, bo = b.order ?? 999;
     return ao !== bo ? ao - bo : a.name.localeCompare(b.name, "ko");
   });
 
-  weeklyTbody.innerHTML = `<tr><td colspan="7" class="weekly-empty">불러오는 중…</td></tr>`;
-
-  const memberLogs = await Promise.all(sorted.map(async m => {
-    try {
-      const logsCol = collection(db, "members", m.id, "attendance_logs");
-      const snap = await getDocs(logsCol);
-      // dateKey별로 Set에 저장 (같은 날 중복 출석은 O 하나로)
-      const presentDays = new Set(
-        snap.docs.map(d => {
-          const iso = d.data().attendedAt;
-          return iso ? dateKey(new Date(iso)) : null;
-        }).filter(Boolean)
-      );
-      return { ...m, presentDays };
-    } catch {
-      return { ...m, presentDays: new Set() };
+  try {
+    // 멤버별 출석 로그 순차 조회 (병렬 과부하 방지)
+    const memberLogs = [];
+    for (const m of sorted) {
+      try {
+        const logsCol = collection(db, "members", m.id, "attendance_logs");
+        const snap = await getDocs(logsCol);
+        const presentDays = new Set(
+          snap.docs
+            .map(d => d.data().attendedAt ? dateKey(new Date(d.data().attendedAt)) : null)
+            .filter(Boolean)
+        );
+        memberLogs.push({ ...m, presentDays });
+      } catch (err) {
+        console.error(`로그 로드 실패 (${m.name}):`, err);
+        memberLogs.push({ ...m, presentDays: new Set() });
+      }
     }
-  }));
 
-  weeklyTbody.innerHTML = memberLogs.map(m => {
-    let count = 0;
-    const cells = days.map(d => {
-      const dk = dateKey(d);
-      const isToday = dk === todayKey;
-      const present = m.presentDays.has(dk);
-      if (present) count++;
-      return `<td class="${isToday ? "col-today" : ""}">
-        <span class="${present ? "att-o" : "att-x"}">${present ? "O" : "X"}</span>
-      </td>`;
+    weeklyTbody.innerHTML = memberLogs.map(m => {
+      let count = 0;
+      const cells = days.map(d => {
+        const dk = dateKey(d);
+        const isToday = dk === todayKey;
+        const present = m.presentDays.has(dk);
+        if (present) count++;
+        return `<td class="${isToday ? "col-today" : ""}">
+          <span class="${present ? "att-o" : "att-x"}">${present ? "O" : "X"}</span>
+        </td>`;
+      }).join("");
+
+      return `<tr>
+        <td class="col-name">${m.name}</td>
+        ${cells}
+        <td class="col-count">${count} / 5</td>
+      </tr>`;
     }).join("");
 
-    return `<tr>
-      <td class="col-name">${m.name}</td>
-      ${cells}
-      <td class="col-count">${count} / 5</td>
-    </tr>`;
-  }).join("");
+  } catch (err) {
+    console.error("renderWeeklyTable 전체 오류:", err);
+    weeklyTbody.innerHTML = `<tr><td colspan="7" class="weekly-empty" style="color:var(--danger)">불러오기 실패: ${err.message}</td></tr>`;
+  }
 }
