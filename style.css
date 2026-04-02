@@ -506,8 +506,127 @@ textarea::placeholder { color: var(--text-muted); }
 .btn-icon:hover { border-color: #fca5a5; color: var(--danger); background: var(--danger-light); }
 
 /* ===========================
-   Empty State
+   Modal
 =========================== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  padding: 16px;
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+
+.modal-overlay.active { opacity: 1; }
+
+.modal-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+  width: 100%;
+  max-width: 420px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: translateY(8px);
+  transition: transform 0.22s ease;
+}
+
+.modal-overlay.active .modal-card { transform: none; }
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.modal-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.modal-sub {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.modal-id {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.modal-body {
+  overflow-y: auto;
+  padding: 16px 20px 20px;
+  flex: 1;
+}
+
+.modal-loading {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  padding: 24px 0;
+}
+
+/* ===========================
+   Log Table
+=========================== */
+.log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.log-table thead th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+
+.log-table tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+
+.log-table tbody tr:last-child { border-bottom: none; }
+.log-table tbody tr:hover { background: var(--bg3); }
+
+.log-num {
+  padding: 10px 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  width: 32px;
+}
+
+.log-date {
+  padding: 10px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.btn-info-icon {
+  font-size: 0.8rem;
+}
 .empty-state {
   text-align: center;
   padding: 28px;

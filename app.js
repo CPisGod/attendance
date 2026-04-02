@@ -6,7 +6,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.11.0/fireba
 import {
   getFirestore,
   doc, getDoc, setDoc, updateDoc,
-  collection, getDocs, deleteDoc, onSnapshot, writeBatch
+  collection, getDocs, deleteDoc, onSnapshot, writeBatch,
+  addDoc, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -157,7 +158,22 @@ btnAttend.addEventListener("click", async () => {
         if (memberDoc.data().present) {
           showMsg(userMsg, `${name} 님은 이미 출석 처리되었습니다.`, "info");
         } else {
-          await updateDoc(doc(db, "members", memberDoc.id), { present: true });
+          const now = new Date();
+          await updateDoc(doc(db, "members", memberDoc.id), {
+            present: true,
+            attendedAt: now.toISOString()
+          });
+          // 출석 로그 서브컬렉션에 기록
+          await addDoc(collection(db, "members", memberDoc.id, "attendance_logs"), {
+            attendedAt: now.toISOString(),
+            year:   now.getFullYear(),
+            month:  now.getMonth() + 1,
+            day:    now.getDate(),
+            hour:   now.getHours(),
+            minute: now.getMinutes(),
+            second: now.getSeconds(),
+            label: formatDateTime(now)
+          });
           showMsg(userMsg, `✓ ${name} 님, 출석이 완료되었습니다!`, "success");
           userNameInput.value = "";
           userCodeInput.value = "";
@@ -374,6 +390,7 @@ function renderMemberList(members) {
       </div>
       <div class="member-actions">
         <span class="member-badge ${m.present ? "present" : "absent"}">${m.present ? "출석" : "미출석"}</span>
+        <button class="btn-icon btn-info-icon" data-info-id="${m.id}" data-info-name="${m.name}" title="출석 기록">📋</button>
         <button class="btn-icon" data-delete="${m.id}" data-name="${m.name}" title="삭제">✕</button>
       </div>
     </div>
@@ -382,6 +399,14 @@ function renderMemberList(members) {
   // 삭제 이벤트
   memberList.querySelectorAll("[data-delete]").forEach(btn => {
     btn.addEventListener("click", () => deleteMember(btn.dataset.delete, btn.dataset.name));
+  });
+
+  // 출석 기록 모달
+  memberList.querySelectorAll("[data-info-id]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openAttendanceModal(btn.dataset.infoId, btn.dataset.infoName);
+    });
   });
 
   // 드래그 앤 드롭 (전체 보기일 때만)
@@ -461,6 +486,85 @@ function updateStats(members) {
   statTotal.textContent   = total;
   statPresent.textContent = present;
   statAbsent.textContent  = total - present;
+}
+
+// ============================================================
+//  날짜 포맷
+// ============================================================
+function formatDateTime(date) {
+  const d = typeof date === "string" ? new Date(date) : date;
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// ============================================================
+//  출석 기록 모달
+// ============================================================
+async function openAttendanceModal(memberId, memberName) {
+  // 모달 생성
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title">${memberName}</div>
+          <div class="modal-sub">ID: <span class="modal-id">${memberId}</span></div>
+        </div>
+        <button class="btn-icon modal-close" title="닫기">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-loading">불러오는 중…</div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add("active"));
+
+  // 닫기
+  const close = () => {
+    overlay.classList.remove("active");
+    setTimeout(() => overlay.remove(), 220);
+  };
+  overlay.querySelector(".modal-close").addEventListener("click", close);
+  overlay.addEventListener("click", e => { if (e.target === overlay) close(); });
+
+  // 로그 불러오기
+  try {
+    const logsCol = collection(db, "members", memberId, "attendance_logs");
+    const q = query(logsCol, orderBy("attendedAt", "desc"));
+    const snap = await getDocs(q);
+
+    const modalBody = overlay.querySelector(".modal-body");
+    if (snap.empty) {
+      modalBody.innerHTML = `<div class="empty-state">출석 기록이 없습니다.</div>`;
+      return;
+    }
+
+    const rows = snap.docs.map((d, i) => {
+      const data = d.data();
+      const label = data.label || formatDateTime(data.attendedAt);
+      return `
+        <tr>
+          <td class="log-num">${snap.docs.length - i}</td>
+          <td class="log-date">${label}</td>
+        </tr>`;
+    }).join("");
+
+    modalBody.innerHTML = `
+      <table class="log-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>출석 일시</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } catch (err) {
+    console.error(err);
+    overlay.querySelector(".modal-body").innerHTML = `<div class="empty-state" style="color:var(--danger)">불러오기 실패</div>`;
+  }
 }
 
 // ============================================================
