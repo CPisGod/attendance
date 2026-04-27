@@ -78,6 +78,12 @@ async function ensureSettings() {
     const snap = await getDoc(SETTINGS_REF);
     if (!snap.exists()) {
       await setDoc(SETTINGS_REF, { adminPassword: "admin1234", attendanceCode: "출석", maxSessions: 1 });
+    } else {
+      // 기존 문서에 maxSessions 필드가 없으면 추가
+      const data = snap.data();
+      const patch = {};
+      if (data.maxSessions === undefined) patch.maxSessions = 1;
+      if (Object.keys(patch).length > 0) await updateDoc(SETTINGS_REF, patch);
     }
   } catch (err) { console.error("ensureSettings:", err); }
 }
@@ -406,18 +412,6 @@ async function toggleWeeklyDaySession(memberId, memberName, dk, currentCount, se
 // ============================================================
 //  엑셀 다운로드 (SheetJS CDN 없이 CSV로 대체 — 엑셀에서 열림)
 // ============================================================
-// ── 날짜 범위 다운로드 DOM ──────────────────────────────────
-const excelDateFrom    = document.getElementById("excel-date-from");
-const excelDateTo      = document.getElementById("excel-date-to");
-const btnDownloadRange = document.getElementById("btn-download-range");
-
-// 기본값: 이번 주 월~목
-(function setDefaultDates() {
-  const days = getWeekDays(0);
-  excelDateFrom.value = dateKey(days[0]);
-  excelDateTo.value   = dateKey(days[days.length - 1]);
-})();
-
 // 현재 주간표 보기용 다운로드 (⬇ 엑셀 버튼)
 function downloadExcel() {
   const data = window._weeklyData;
@@ -426,72 +420,6 @@ function downloadExcel() {
   buildAndDownloadCSV(days, DAY_KO, maxSessions, rows, weekLabel.textContent.replace(/\s/g,"_"));
 }
 document.getElementById("btn-download-excel").addEventListener("click", downloadExcel);
-
-// 날짜 범위 다운로드
-btnDownloadRange.addEventListener("click", async () => {
-  const from = excelDateFrom.value;
-  const to   = excelDateTo.value;
-  if (!from || !to) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
-  if (from > to)    { alert("시작일이 종료일보다 늦을 수 없습니다."); return; }
-
-  btnDownloadRange.textContent = "로딩 중…";
-  btnDownloadRange.disabled = true;
-
-  try {
-    // 범위 내 날짜 생성 (금요일 제외)
-    const days = [];
-    const DAY_KO_MAP = ["일","월","화","수","목","금","토"];
-    let cur = new Date(from + "T00:00:00");
-    const end = new Date(to   + "T00:00:00");
-    while (cur <= end) {
-      if (cur.getDay() !== 5 && cur.getDay() !== 0) { // 금(5), 일(0) 제외
-        days.push(new Date(cur));
-      }
-      cur.setDate(cur.getDate() + 1);
-    }
-
-    if (days.length === 0) { alert("선택한 기간에 평일(월~목)이 없습니다."); return; }
-
-    const DAY_KO = days.map(d => DAY_KO_MAP[d.getDay()]);
-
-    // 설정에서 maxSessions 가져오기
-    let maxSessions = 1;
-    const snap = await getDoc(SETTINGS_REF);
-    if (snap.exists()) maxSessions = snap.data().maxSessions || 1;
-
-    // 멤버별 전체 로그 조회
-    const sorted = [...cachedMembers].sort((a, b) => {
-      const ao = a.order ?? 999, bo = b.order ?? 999;
-      return ao !== bo ? ao - bo : a.name.localeCompare(b.name, "ko");
-    });
-
-    const rows = [];
-    for (const m of sorted) {
-      const logsCol = collection(db, "members", m.id, "attendance_logs");
-      const logSnap = await getDocs(logsCol);
-      const dayCountMap = new Map();
-      logSnap.docs.forEach(d => {
-        const dk = d.data().date;
-        if (dk) dayCountMap.set(dk, (dayCountMap.get(dk) || 0) + 1);
-      });
-      let totalSessions = 0;
-      days.forEach(d => {
-        const count = dayCountMap.get(dateKey(d)) || 0;
-        totalSessions += Math.min(count, maxSessions);
-      });
-      rows.push({ name: m.name, dayCountMap, totalSessions, maxTotal: days.length * maxSessions });
-    }
-
-    const fileName = `출석표_${from}_~_${to}`;
-    buildAndDownloadCSV(days, DAY_KO, maxSessions, rows, fileName);
-  } catch (err) {
-    console.error(err);
-    alert("다운로드 중 오류가 발생했습니다.");
-  } finally {
-    btnDownloadRange.textContent = "⬇ 다운로드";
-    btnDownloadRange.disabled = false;
-  }
-});
 
 // CSV 생성 공통 함수
 function buildAndDownloadCSV(days, DAY_KO, maxSessions, rows, fileName) {
@@ -834,6 +762,77 @@ function initWeeklyTable() {
 
   btnWeekPrev.onclick = () => { weekOffset--; renderWeeklyTable(); };
   btnWeekNext.onclick = () => { weekOffset++; renderWeeklyTable(); };
+
+  // 날짜 범위 다운로드 초기화 (admin 진입 시점에 DOM이 존재)
+  const excelDateFrom    = document.getElementById("excel-date-from");
+  const excelDateTo      = document.getElementById("excel-date-to");
+  const btnDownloadRange = document.getElementById("btn-download-range");
+
+  // 기본값: 이번 주 월~목
+  const weekDays = getWeekDays(0);
+  excelDateFrom.value = dateKey(weekDays[0]);
+  excelDateTo.value   = dateKey(weekDays[weekDays.length - 1]);
+
+  // 이전에 붙은 리스너 제거 후 재등록 (중복 방지)
+  const newBtn = btnDownloadRange.cloneNode(true);
+  btnDownloadRange.parentNode.replaceChild(newBtn, btnDownloadRange);
+
+  newBtn.addEventListener("click", async () => {
+    const from = excelDateFrom.value;
+    const to   = excelDateTo.value;
+    if (!from || !to) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
+    if (from > to)    { alert("시작일이 종료일보다 늦을 수 없습니다."); return; }
+
+    newBtn.textContent = "로딩 중…";
+    newBtn.disabled = true;
+
+    try {
+      const DAY_KO_MAP = ["일","월","화","수","목","금","토"];
+      const days = [];
+      let cur = new Date(from + "T00:00:00");
+      const end = new Date(to + "T00:00:00");
+      while (cur <= end) {
+        if (cur.getDay() !== 5 && cur.getDay() !== 0) {
+          days.push(new Date(cur));
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
+
+      if (days.length === 0) { alert("선택한 기간에 평일(월~목)이 없습니다."); return; }
+
+      const DAY_KO = days.map(d => DAY_KO_MAP[d.getDay()]);
+
+      let maxSessions = 1;
+      const snap = await getDoc(SETTINGS_REF);
+      if (snap.exists()) maxSessions = snap.data().maxSessions || 1;
+
+      const sorted = [...cachedMembers].sort((a, b) => {
+        const ao = a.order ?? 999, bo = b.order ?? 999;
+        return ao !== bo ? ao - bo : a.name.localeCompare(b.name, "ko");
+      });
+
+      const rows = [];
+      for (const m of sorted) {
+        const logSnap = await getDocs(collection(db, "members", m.id, "attendance_logs"));
+        const dayCountMap = new Map();
+        logSnap.docs.forEach(d => {
+          const dk = d.data().date;
+          if (dk) dayCountMap.set(dk, (dayCountMap.get(dk) || 0) + 1);
+        });
+        let totalSessions = 0;
+        days.forEach(d => { totalSessions += Math.min(dayCountMap.get(dateKey(d)) || 0, maxSessions); });
+        rows.push({ name: m.name, dayCountMap, totalSessions, maxTotal: days.length * maxSessions });
+      }
+
+      buildAndDownloadCSV(days, DAY_KO, maxSessions, rows, `출석표_${from}_~_${to}`);
+    } catch (err) {
+      console.error(err);
+      alert("다운로드 중 오류가 발생했습니다.");
+    } finally {
+      newBtn.textContent = "⬇ 다운로드";
+      newBtn.disabled = false;
+    }
+  });
 }
 
 async function renderWeeklyTable() {
