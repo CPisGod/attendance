@@ -638,6 +638,49 @@ textarea::placeholder { color: var(--text-muted); }
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 날짜 범위 선택 */
+.date-range-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  flex-wrap: wrap;
+}
+
+.date-range-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-sub);
+  white-space: nowrap;
+}
+
+.date-range-sep {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+input[type="date"] {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-main);
+  font-size: 0.85rem;
+  padding: 7px 10px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+input[type="date"]:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
 }
 
 .week-label {

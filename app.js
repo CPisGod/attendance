@@ -167,29 +167,20 @@ btnAttend.addEventListener("click", async () => {
         const logsCol = collection(db, "members", memberId, "attendance_logs");
         const allLogs = await getDocs(logsCol);
         const todayKey = dateKey(new Date());
-        const todayLogs = allLogs.docs.filter(d => {
-          const iso = d.data().attendedAt;
-          return iso && dateKey(new Date(iso)) === todayKey;
-        });
+        const todayLogs = allLogs.docs.filter(d => d.data().date === todayKey);
         const todayCount = todayLogs.length;
 
         if (todayCount >= maxSessions) {
           const sessionLabel = maxSessions === 1 ? "1회" : `${maxSessions}회`;
           showMsg(userMsg, `오늘 출석 횟수(${sessionLabel})를 모두 완료했습니다.`, "info");
         } else {
-          const now = new Date();
-          const sessionNum = todayCount + 1; // 몇 번째 출석인지
+          const sessionNum = todayCount + 1;
           await addDoc(logsCol, {
-            attendedAt: now.toISOString(),
-            year: now.getFullYear(), month: now.getMonth()+1, day: now.getDate(),
-            hour: now.getHours(), minute: now.getMinutes(), second: now.getSeconds(),
-            label: formatDateTime(now),
-            session: sessionNum
+            date: todayKey,       // "YYYY-MM-DD"
+            session: sessionNum   // 1 or 2
           });
-          // present 는 1회차 이상이면 true
           await updateDoc(doc(db, "members", memberId), {
             present: true,
-            attendedAt: now.toISOString(),
             sessionCount: sessionNum
           });
           const sessionLabel = maxSessions > 1 ? ` (${sessionNum}/${maxSessions}회차)` : "";
@@ -353,29 +344,17 @@ async function toggleTodayAttendance(memberId, isCurrentlyPresent) {
   const todayKey = dateKey(new Date());
   try {
     if (isCurrentlyPresent) {
-      // 출석 → 미출석: present=false, 오늘 날짜 로그 삭제
-      await updateDoc(doc(db, "members", memberId), { present: false, attendedAt: null });
-      // 오늘 날짜 로그 찾아서 삭제
+      // 출석 → 미출석: present=false, 오늘 로그 삭제
+      await updateDoc(doc(db, "members", memberId), { present: false, sessionCount: 0 });
       const logsCol = collection(db, "members", memberId, "attendance_logs");
       const snap = await getDocs(logsCol);
-      const toDelete = snap.docs.filter(d => {
-        const iso = d.data().attendedAt;
-        return iso && dateKey(new Date(iso)) === todayKey;
-      });
+      const toDelete = snap.docs.filter(d => d.data().date === todayKey);
       await Promise.all(toDelete.map(d => deleteDoc(doc(db, "members", memberId, "attendance_logs", d.id))));
     } else {
-      // 미출석 → 출석: present=true, 로그 추가
-      const now = new Date();
-      await updateDoc(doc(db, "members", memberId), {
-        present: true,
-        attendedAt: now.toISOString()
-      });
-      await addDoc(collection(db, "members", memberId, "attendance_logs"), {
-        attendedAt: now.toISOString(),
-        year: now.getFullYear(), month: now.getMonth()+1, day: now.getDate(),
-        hour: now.getHours(), minute: now.getMinutes(), second: now.getSeconds(),
-        label: formatDateTime(now)
-      });
+      // 미출석 → 출석: 로그 1개 추가
+      const logsCol = collection(db, "members", memberId, "attendance_logs");
+      await addDoc(logsCol, { date: todayKey, session: 1 });
+      await updateDoc(doc(db, "members", memberId), { present: true, sessionCount: 1 });
     }
     renderWeeklyTable();
   } catch (err) {
@@ -388,46 +367,33 @@ async function toggleTodayAttendance(memberId, isCurrentlyPresent) {
 // ============================================================
 async function toggleWeeklyDaySession(memberId, memberName, dk, currentCount, sessionNum, maxSessions) {
   try {
-    const logsCol = collection(db, "members", memberId, "attendance_logs");
-    const snap    = await getDocs(logsCol);
+    const logsCol  = collection(db, "members", memberId, "attendance_logs");
+    const snap     = await getDocs(logsCol);
     const todayKey = dateKey(new Date());
 
-    // 해당 날짜 로그들 시간순 정렬
+    // 해당 날짜 로그 (session 오름차순)
     const dayLogs = snap.docs
-      .filter(d => d.data().attendedAt && dateKey(new Date(d.data().attendedAt)) === dk)
-      .sort((a, b) => a.data().attendedAt.localeCompare(b.data().attendedAt));
+      .filter(d => d.data().date === dk)
+      .sort((a, b) => (a.data().session || 1) - (b.data().session || 1));
 
     if (sessionNum <= currentCount) {
-      // O → X: 가장 최근 로그 1개 삭제
+      // O → X: 해당 회차 로그 삭제 (마지막 것 제거)
       const toDelete = dayLogs[dayLogs.length - 1];
       if (toDelete) await deleteDoc(doc(db, "members", memberId, "attendance_logs", toDelete.id));
-
-      // 오늘이면 present 업데이트
       if (dk === todayKey) {
         const newCount = dayLogs.length - 1;
         await updateDoc(doc(db, "members", memberId), {
           present: newCount > 0,
-          sessionCount: newCount,
-          attendedAt: newCount > 0 ? dayLogs[newCount - 1]?.data().attendedAt : null
+          sessionCount: newCount
         });
       }
     } else {
       // X → O: 로그 추가
-      const [y, mo, d] = dk.split("-").map(Number);
-      const logDate = new Date(y, mo - 1, d, 12 + (sessionNum - 1), 0, 0);
-      await addDoc(logsCol, {
-        attendedAt: logDate.toISOString(),
-        year: y, month: mo, day: d,
-        hour: logDate.getHours(), minute: 0, second: 0,
-        label: formatDateTime(logDate),
-        session: sessionNum
-      });
-      // 오늘이면 present 업데이트
+      await addDoc(logsCol, { date: dk, session: dayLogs.length + 1 });
       if (dk === todayKey) {
         await updateDoc(doc(db, "members", memberId), {
           present: true,
-          sessionCount: dayLogs.length + 1,
-          attendedAt: logDate.toISOString()
+          sessionCount: dayLogs.length + 1
         });
       }
     }
@@ -440,14 +406,97 @@ async function toggleWeeklyDaySession(memberId, memberName, dk, currentCount, se
 // ============================================================
 //  엑셀 다운로드 (SheetJS CDN 없이 CSV로 대체 — 엑셀에서 열림)
 // ============================================================
+// ── 날짜 범위 다운로드 DOM ──────────────────────────────────
+const excelDateFrom    = document.getElementById("excel-date-from");
+const excelDateTo      = document.getElementById("excel-date-to");
+const btnDownloadRange = document.getElementById("btn-download-range");
+
+// 기본값: 이번 주 월~목
+(function setDefaultDates() {
+  const days = getWeekDays(0);
+  excelDateFrom.value = dateKey(days[0]);
+  excelDateTo.value   = dateKey(days[days.length - 1]);
+})();
+
+// 현재 주간표 보기용 다운로드 (⬇ 엑셀 버튼)
 function downloadExcel() {
   const data = window._weeklyData;
   if (!data) return;
-
   const { days, DAY_KO, maxSessions, rows } = data;
+  buildAndDownloadCSV(days, DAY_KO, maxSessions, rows, weekLabel.textContent.replace(/\s/g,"_"));
+}
+document.getElementById("btn-download-excel").addEventListener("click", downloadExcel);
+
+// 날짜 범위 다운로드
+btnDownloadRange.addEventListener("click", async () => {
+  const from = excelDateFrom.value;
+  const to   = excelDateTo.value;
+  if (!from || !to) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
+  if (from > to)    { alert("시작일이 종료일보다 늦을 수 없습니다."); return; }
+
+  btnDownloadRange.textContent = "로딩 중…";
+  btnDownloadRange.disabled = true;
+
+  try {
+    // 범위 내 날짜 생성 (금요일 제외)
+    const days = [];
+    const DAY_KO_MAP = ["일","월","화","수","목","금","토"];
+    let cur = new Date(from + "T00:00:00");
+    const end = new Date(to   + "T00:00:00");
+    while (cur <= end) {
+      if (cur.getDay() !== 5 && cur.getDay() !== 0) { // 금(5), 일(0) 제외
+        days.push(new Date(cur));
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    if (days.length === 0) { alert("선택한 기간에 평일(월~목)이 없습니다."); return; }
+
+    const DAY_KO = days.map(d => DAY_KO_MAP[d.getDay()]);
+
+    // 설정에서 maxSessions 가져오기
+    let maxSessions = 1;
+    const snap = await getDoc(SETTINGS_REF);
+    if (snap.exists()) maxSessions = snap.data().maxSessions || 1;
+
+    // 멤버별 전체 로그 조회
+    const sorted = [...cachedMembers].sort((a, b) => {
+      const ao = a.order ?? 999, bo = b.order ?? 999;
+      return ao !== bo ? ao - bo : a.name.localeCompare(b.name, "ko");
+    });
+
+    const rows = [];
+    for (const m of sorted) {
+      const logsCol = collection(db, "members", m.id, "attendance_logs");
+      const logSnap = await getDocs(logsCol);
+      const dayCountMap = new Map();
+      logSnap.docs.forEach(d => {
+        const dk = d.data().date;
+        if (dk) dayCountMap.set(dk, (dayCountMap.get(dk) || 0) + 1);
+      });
+      let totalSessions = 0;
+      days.forEach(d => {
+        const count = dayCountMap.get(dateKey(d)) || 0;
+        totalSessions += Math.min(count, maxSessions);
+      });
+      rows.push({ name: m.name, dayCountMap, totalSessions, maxTotal: days.length * maxSessions });
+    }
+
+    const fileName = `출석표_${from}_~_${to}`;
+    buildAndDownloadCSV(days, DAY_KO, maxSessions, rows, fileName);
+  } catch (err) {
+    console.error(err);
+    alert("다운로드 중 오류가 발생했습니다.");
+  } finally {
+    btnDownloadRange.textContent = "⬇ 다운로드";
+    btnDownloadRange.disabled = false;
+  }
+});
+
+// CSV 생성 공통 함수
+function buildAndDownloadCSV(days, DAY_KO, maxSessions, rows, fileName) {
   const pad = n => String(n).padStart(2, "0");
 
-  // 헤더 행
   const dayHeaders = days.map((d, i) => {
     const base = `${DAY_KO[i]} ${pad(d.getMonth()+1)}/${pad(d.getDate())}`;
     if (maxSessions === 2) return [`${base} 1회`, `${base} 2회`];
@@ -456,11 +505,9 @@ function downloadExcel() {
 
   const headers = ["이름", ...dayHeaders, "출석수"];
 
-  // 데이터 행
   const csvRows = rows.map(r => {
     const cells = days.map(d => {
-      const dk = dateKey(d);
-      const count = r.dayCountMap.get(dk) || 0;
+      const count = r.dayCountMap.get(dateKey(d)) || 0;
       if (maxSessions === 2) return [`${count >= 1 ? "O" : "X"}`, `${count >= 2 ? "O" : "X"}`];
       return [`${count >= 1 ? "O" : "X"}`];
     }).flat();
@@ -468,19 +515,15 @@ function downloadExcel() {
   });
 
   const allRows = [headers, ...csvRows];
-  const csv = "\uFEFF" + allRows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
-
+  const csv  = "\uFEFF" + allRows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
   a.href     = url;
-  a.download = `출석표_${weekLabel.textContent.replace(/\s/g,"_")}.csv`;
+  a.download = `${fileName}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
-
-// 다운로드 버튼
-document.getElementById("btn-download-excel").addEventListener("click", downloadExcel);
 async function deleteMember(id, name) {
   if (!confirm(`"${name}" 님을 목록에서 삭제할까요?`)) return;
   try {
@@ -713,7 +756,7 @@ async function openAttendanceModal(memberId, memberName) {
   // 로그 불러오기
   try {
     const logsCol = collection(db, "members", memberId, "attendance_logs");
-    const q = query(logsCol, orderBy("attendedAt", "desc"));
+    const q = query(logsCol, orderBy("date", "desc"));
     const snap = await getDocs(q);
 
     const modalBody = overlay.querySelector(".modal-body");
@@ -724,7 +767,7 @@ async function openAttendanceModal(memberId, memberName) {
 
     const rows = snap.docs.map((d, i) => {
       const data = d.data();
-      const label = data.label || formatDateTime(data.attendedAt);
+      const label = data.date + (data.session ? ` (${data.session}회차)` : "");
       return `
         <tr>
           <td class="log-num">${snap.docs.length - i}</td>
@@ -765,14 +808,14 @@ function showMsg(el, text, type = "info") {
 let weekOffset = 0; // 0 = 이번주, -1 = 지난주, ...
 
 function getWeekDays(offset = 0) {
-  // 이번 주 월~금 날짜 배열 반환
+  // 이번 주 월~목 날짜 배열 반환 (금요일 제외)
   const now = new Date();
-  const day = now.getDay(); // 0=일, 1=월 ...
+  const day = now.getDay();
   const monday = new Date(now);
   monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1) + offset * 7);
   monday.setHours(0, 0, 0, 0);
 
-  return Array.from({ length: 5 }, (_, i) => {
+  return Array.from({ length: 4 }, (_, i) => {  // 5→4 (월화수목)
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
     return d;
@@ -796,7 +839,7 @@ function initWeeklyTable() {
 async function renderWeeklyTable() {
   const days = getWeekDays(weekOffset);
   const todayKey = dateKey(new Date());
-  const DAY_KO = ["월", "화", "수", "목", "금"];
+  const DAY_KO = ["월", "화", "수", "목"];
   const pad = n => String(n).padStart(2, "0");
 
   // 설정에서 maxSessions 가져오기
@@ -848,13 +891,11 @@ async function renderWeeklyTable() {
       try {
         const logsCol = collection(db, "members", m.id, "attendance_logs");
         const snap = await getDocs(logsCol);
-        // 날짜별 로그 횟수 Map
+        // 날짜별 로그 횟수 Map  { "YYYY-MM-DD": count }
         const dayCountMap = new Map();
         snap.docs.forEach(d => {
-          const iso = d.data().attendedAt;
-          if (!iso) return;
-          const dk = dateKey(new Date(iso));
-          dayCountMap.set(dk, (dayCountMap.get(dk) || 0) + 1);
+          const dk = d.data().date;
+          if (dk) dayCountMap.set(dk, (dayCountMap.get(dk) || 0) + 1);
         });
         memberLogs.push({ ...m, dayCountMap });
       } catch (err) {

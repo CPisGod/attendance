@@ -141,6 +141,14 @@
             <button id="btn-download-excel" class="btn btn-accent btn-sm">⬇ 엑셀</button>
           </div>
         </div>
+        <!-- 날짜 범위 선택 (엑셀 다운로드용) -->
+        <div class="date-range-row">
+          <span class="date-range-label">📅 다운로드 기간</span>
+          <input type="date" id="excel-date-from" />
+          <span class="date-range-sep">~</span>
+          <input type="date" id="excel-date-to" />
+          <button id="btn-download-range" class="btn btn-accent btn-sm">⬇ 다운로드</button>
+        </div>
         <div class="weekly-table-wrap">
           <table id="weekly-table" class="weekly-table">
             <thead id="weekly-thead"></thead>
