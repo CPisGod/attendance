@@ -744,6 +744,52 @@ textarea::placeholder { color: var(--text-muted); }
 
 .badge-toggle:hover { filter: brightness(0.92); transform: scale(1.04); }
 
+/* ===========================
+   Session Setting
+=========================== */
+.session-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.session-label {
+  font-size: 0.83rem;
+  font-weight: 500;
+  color: var(--text-sub);
+}
+
+.session-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.session-btn {
+  padding: 5px 16px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: var(--font-main);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg2);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.session-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.session-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 1px 6px rgba(59,130,246,0.3);
+}
+
 .col-today { background: rgba(59,130,246,0.05); }
 .th-today  { background: var(--accent-light) !important; color: var(--accent) !important; }
 

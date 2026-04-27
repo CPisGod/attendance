@@ -88,6 +88,14 @@
           <button id="btn-save-code" class="btn btn-primary">저장</button>
         </div>
         <div id="code-msg" class="msg-box hidden"></div>
+        <!-- 회차 설정 -->
+        <div class="session-setting">
+          <span class="session-label">오늘 출석 허용 횟수</span>
+          <div class="session-btns">
+            <button class="session-btn active" data-session="1">1회</button>
+            <button class="session-btn" data-session="2">2회</button>
+          </div>
+        </div>
       </section>
 
       <!-- 인원 관리 -->
@@ -130,6 +138,7 @@
             <button id="btn-week-prev" class="btn btn-ghost btn-sm">‹ 이전</button>
             <span id="week-label" class="week-label">로딩 중…</span>
             <button id="btn-week-next" class="btn btn-ghost btn-sm">다음 ›</button>
+            <button id="btn-download-excel" class="btn btn-accent btn-sm">⬇ 엑셀</button>
           </div>
         </div>
         <div class="weekly-table-wrap">
