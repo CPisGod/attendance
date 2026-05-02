@@ -9,7 +9,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.11.0/fireba
 import {
   getFirestore,
   doc, getDoc, setDoc, updateDoc,
-  collection, onSnapshot, writeBatch, deleteDoc
+  collection, getDocs, onSnapshot, writeBatch, deleteDoc
 } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -129,6 +129,14 @@ async function ensureSettings() {
 }
 ensureSettings();
 loadDailyMessage();
+loadMembersForUser();
+
+async function loadMembersForUser() {
+  try {
+    const snap = await getDocs(MEMBERS_COL);
+    cachedMembers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) { console.error("loadMembersForUser:", e); }
+}
 
 async function loadDailyMessage() {
   try {
@@ -297,6 +305,29 @@ async function deleteMember(id, name) {
   if (!confirm(`"${name}" 님을 삭제할까요?`)) return;
   await deleteDoc(doc(db, "members", id));
 }
+
+// 기존 문서 마이그레이션 (logs 필드 없는 멤버에 logs:{} 추가)
+$("btn-migrate").addEventListener("click", async () => {
+  if (!confirm("기존 멤버 문서에 logs 필드를 추가합니다. 진행할까요?")) return;
+  try {
+    const snap = await getDocs(MEMBERS_COL);
+    const batch = writeBatch(db);
+    let count = 0;
+    snap.docs.forEach(d => {
+      const data = d.data();
+      const patch = {};
+      if (data.logs === undefined)         patch.logs         = {};
+      if (data.sessionCount === undefined) patch.sessionCount = 0;
+      if (Object.keys(patch).length) { batch.update(doc(db, "members", d.id), patch); count++; }
+    });
+    if (count === 0) { showMsg(memberMsg, "이미 모두 최신 형식입니다.", "info"); return; }
+    await batch.commit();
+    showMsg(memberMsg, `${count}명 마이그레이션 완료!`, "success");
+  } catch (e) {
+    console.error(e);
+    showMsg(memberMsg, "오류가 발생했습니다.", "error");
+  }
+});
 
 // 출석 초기화 (오늘 날짜만 logs에서 제거)
 btnResetAtt.addEventListener("click", async () => {

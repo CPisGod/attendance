@@ -634,35 +634,48 @@ textarea::placeholder { color: var(--text-muted); }
 =========================== */
 .panel-wide { overflow: hidden; }
 
+/* 주 이동 네비 */
 .week-nav {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 6px;
 }
 
-/* 날짜 범위 선택 */
-.date-range-row {
+.week-nav .btn-ghost { flex-shrink: 0; }
+.week-nav .btn-accent { flex-shrink: 0; margin-left: auto; }
+
+/* 날짜 범위 다운로드 */
+.date-range-block {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 12px 14px;
   background: var(--bg3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  flex-wrap: wrap;
 }
 
 .date-range-label {
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--text-sub);
-  white-space: nowrap;
+}
+
+.date-range-inputs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.date-range-inputs input[type="date"] {
+  flex: 1;
+  min-width: 0;
 }
 
 .date-range-sep {
   font-size: 0.85rem;
   color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 input[type="date"] {

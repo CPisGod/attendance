@@ -106,6 +106,8 @@
           <button id="btn-add-member" class="btn btn-accent btn-sm">+ 추가</button>
         </div>
         <div id="member-msg" class="msg-box hidden"></div>
+        <!-- DB 마이그레이션 -->
+        <button id="btn-migrate" class="btn btn-ghost btn-sm" style="align-self:flex-start">🔧 기존 데이터 마이그레이션</button>
       </section>
 
       <!-- 출석 현황 -->
@@ -132,23 +134,27 @@
 
       <!-- 주간 출석표 -->
       <section class="panel panel-wide">
-        <div class="panel-title-row">
-          <h2 class="panel-title">주간 출석표</h2>
-          <div class="week-nav">
-            <button id="btn-week-prev" class="btn btn-ghost btn-sm">‹ 이전</button>
-            <span id="week-label" class="week-label">로딩 중…</span>
-            <button id="btn-week-next" class="btn btn-ghost btn-sm">다음 ›</button>
-            <button id="btn-download-excel" class="btn btn-accent btn-sm">⬇ 엑셀</button>
+        <h2 class="panel-title">주간 출석표</h2>
+
+        <!-- 주 이동 -->
+        <div class="week-nav">
+          <button id="btn-week-prev" class="btn btn-ghost btn-sm">‹ 이전</button>
+          <span id="week-label" class="week-label">로딩 중…</span>
+          <button id="btn-week-next" class="btn btn-ghost btn-sm">다음 ›</button>
+          <button id="btn-download-excel" class="btn btn-accent btn-sm">⬇ 이번 주</button>
+        </div>
+
+        <!-- 날짜 범위 다운로드 -->
+        <div class="date-range-block">
+          <span class="date-range-label">📅 기간 다운로드</span>
+          <div class="date-range-inputs">
+            <input type="date" id="excel-date-from" />
+            <span class="date-range-sep">~</span>
+            <input type="date" id="excel-date-to" />
           </div>
+          <button id="btn-download-range" class="btn btn-accent btn-sm" style="width:100%">⬇ 다운로드</button>
         </div>
-        <!-- 날짜 범위 선택 (엑셀 다운로드용) -->
-        <div class="date-range-row">
-          <span class="date-range-label">📅 다운로드 기간</span>
-          <input type="date" id="excel-date-from" />
-          <span class="date-range-sep">~</span>
-          <input type="date" id="excel-date-to" />
-          <button id="btn-download-range" class="btn btn-accent btn-sm">⬇ 다운로드</button>
-        </div>
+
         <div class="weekly-table-wrap">
           <table id="weekly-table" class="weekly-table">
             <thead id="weekly-thead"></thead>
