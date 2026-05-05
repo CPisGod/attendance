@@ -34,27 +34,11 @@ let unsubMembers       = null;
 let currentFilter      = "all";
 let cachedMembers      = [];
 let dragSrcId          = null;
-let weekOffset         = 0;
 
 // ── 유틸 ──────────────────────────────────────────────────
 const pad = n => String(n).padStart(2, "0");
-
 function dateKey(date) {
   return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}`;
-}
-
-function getWeekDays(offset = 0) {
-  // 월~목 4일
-  const now = new Date();
-  const day = now.getDay();
-  const mon = new Date(now);
-  mon.setDate(now.getDate() - (day === 0 ? 6 : day - 1) + offset * 7);
-  mon.setHours(0, 0, 0, 0);
-  return Array.from({ length: 4 }, (_, i) => {
-    const d = new Date(mon);
-    d.setDate(mon.getDate() + i);
-    return d;
-  });
 }
 
 function showMsg(el, text, type = "info") {
@@ -104,11 +88,6 @@ const newMessageInput    = $("new-message-input");
 const btnSaveMessage     = $("btn-save-message");
 const btnClearMessage    = $("btn-clear-message");
 const messageMsg         = $("message-msg");
-const weeklyThead        = $("weekly-thead");
-const weeklyTbody        = $("weekly-tbody");
-const weekLabel          = $("week-label");
-const btnWeekPrev        = $("btn-week-prev");
-const btnWeekNext        = $("btn-week-next");
 const sessionBtns        = document.querySelectorAll(".session-btn");
 
 // ============================================================
@@ -118,11 +97,11 @@ async function ensureSettings() {
   try {
     const snap = await getDoc(SETTINGS_REF);
     if (!snap.exists()) {
-      await setDoc(SETTINGS_REF, { adminPassword: "admin1234", attendanceCode: "출석", maxSessions: 1 });
+      await setDoc(SETTINGS_REF, { adminPassword: "admin1234", attendanceCode: "출석", maxSessions: 2 });
     } else {
       const data = snap.data();
       const patch = {};
-      if (data.maxSessions === undefined) patch.maxSessions = 1;
+      if (data.maxSessions === undefined) patch.maxSessions = 2;
       if (Object.keys(patch).length) await updateDoc(SETTINGS_REF, patch);
     }
   } catch (e) { console.error(e); }
@@ -185,7 +164,7 @@ btnAttend.addEventListener("click", async () => {
     if (!settings) { showMsg(userMsg, "설정을 불러올 수 없습니다.", "error"); return; }
     if (code !== settings.attendanceCode) { showMsg(userMsg, "암호가 틀렸습니다.", "error"); return; }
 
-    const maxSessions = settings.maxSessions || 1;
+    const maxSessions = settings.maxSessions ?? 2;
     const todayKey    = dateKey(new Date());
 
     // cachedMembers에서 이름 찾기 (읽기 절약)
@@ -228,7 +207,7 @@ function switchToAdmin() {
   adminScreen.classList.remove("hidden"); adminScreen.classList.add("active");
   loadAdminData();
   startMembersListener();
-  initWeeklyTable();
+  initDownload();
 }
 function switchToUser() {
   adminScreen.classList.remove("active"); adminScreen.classList.add("hidden");
@@ -248,7 +227,7 @@ async function loadAdminData() {
     const msg = data.dailyMessage || "";
     currentMsgDisplay.textContent = msg || "설정된 메시지 없음";
     newMessageInput.value = msg;
-    const ms = data.maxSessions || 1;
+    const ms = data.maxSessions ?? 2;
     sessionBtns.forEach(b => b.classList.toggle("active", Number(b.dataset.session) === ms));
   } catch (e) { console.error(e); }
 }
@@ -352,7 +331,6 @@ function startMembersListener() {
     cachedMembers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     renderMemberList(cachedMembers);
     updateStats(cachedMembers);
-    renderWeeklyTable(); // 멤버 데이터 안에 logs 포함 → 추가 읽기 없음
   }, e => console.error(e));
 }
 
@@ -503,148 +481,64 @@ function attachDragEvents(sortedAll) {
 // ============================================================
 //  주간 출석표 — logs 필드에서 직접 읽기 (추가 읽기 0회)
 // ============================================================
-function initWeeklyTable() {
-  weekOffset = 0;
-  renderWeeklyTable();
-  btnWeekPrev.onclick = () => { weekOffset--; renderWeeklyTable(); };
-  btnWeekNext.onclick = () => { weekOffset++; renderWeeklyTable(); };
+// ============================================================
+//  출석 데이터 다운로드
+// ============================================================
+function initDownload() {
+  const fromEl = $("excel-date-from");
+  const toEl   = $("excel-date-to");
+  const dlBtn  = $("btn-download-range");
+  const dlMsg  = $("download-msg");
 
-  // 날짜 범위 다운로드
-  const fromEl  = $("excel-date-from");
-  const toEl    = $("excel-date-to");
-  const days0   = getWeekDays(0);
-  fromEl.value  = dateKey(days0[0]);
-  toEl.value    = dateKey(days0[days0.length - 1]);
+  // 기본값: 이번 주 월~목
+  const DAY_MAP = ["일","월","화","수","목","금","토"];
+  const now = new Date();
+  const day = now.getDay();
+  const mon = new Date(now);
+  mon.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
+  const thu = new Date(mon); thu.setDate(mon.getDate() + 3);
+  fromEl.value = dateKey(mon);
+  toEl.value   = dateKey(thu);
 
-  const dlBtn = $("btn-download-range").cloneNode(true);
-  $("btn-download-range").replaceWith(dlBtn);
   dlBtn.addEventListener("click", async () => {
     const from = fromEl.value, to = toEl.value;
-    if (!from || !to || from > to) { alert("날짜 범위를 확인해주세요."); return; }
+    if (!from || !to || from > to) { showMsg(dlMsg, "날짜 범위를 확인해주세요.", "error"); return; }
+
     dlBtn.textContent = "로딩 중…"; dlBtn.disabled = true;
     try {
-      const DAY_MAP = ["일","월","화","수","목","금","토"];
+      // 월~목만 (금·토·일 제외)
       const days = [], DAY_KO = [];
       let cur = new Date(from + "T00:00:00");
       const end = new Date(to + "T00:00:00");
       while (cur <= end) {
-        if (cur.getDay() !== 0 && cur.getDay() !== 6) { // 토·일 제외 (금 포함 안함 = 5도 제외)
-          if (cur.getDay() !== 5) { days.push(new Date(cur)); DAY_KO.push(DAY_MAP[cur.getDay()]); }
-        }
+        const d = cur.getDay();
+        if (d >= 1 && d <= 4) { days.push(new Date(cur)); DAY_KO.push(DAY_MAP[d]); }
         cur.setDate(cur.getDate() + 1);
       }
-      if (!days.length) { alert("선택 기간에 평일(월~목)이 없습니다."); return; }
-      const ms   = (await getDoc(SETTINGS_REF)).data()?.maxSessions || 1;
+      if (!days.length) { showMsg(dlMsg, "선택 기간에 월~목이 없습니다.", "error"); return; }
+
+      // settings 읽기 1회
+      const ms = (await getDoc(SETTINGS_REF)).data()?.maxSessions ?? 2;
+
+      // cachedMembers에서 logs 바로 사용 — 추가 읽기 없음
       const rows = sortedMembers().map(m => {
         const logs = m.logs || {};
         let total  = 0;
         days.forEach(d => { total += Math.min(logs[dateKey(d)] || 0, ms); });
         return { name: m.name, logs, total, maxTotal: days.length * ms };
       });
+
       buildCSV(days, DAY_KO, ms, rows, `출석표_${from}_~_${to}`);
-    } catch (e) { alert("오류 발생"); console.error(e); }
-    finally { dlBtn.textContent = "⬇ 다운로드"; dlBtn.disabled = false; }
+      showMsg(dlMsg, "다운로드 완료!", "success");
+    } catch (e) {
+      console.error(e);
+      showMsg(dlMsg, "오류가 발생했습니다.", "error");
+    } finally {
+      dlBtn.textContent = "⬇ 엑셀 다운로드";
+      dlBtn.disabled = false;
+    }
   });
 }
-
-async function renderWeeklyTable() {
-  const days     = getWeekDays(weekOffset);
-  const todayKey = dateKey(new Date());
-  const DAY_KO   = ["월","화","수","목"];
-  const ms       = (await getDoc(SETTINGS_REF)).data()?.maxSessions || 1;
-  const s = days[0], e = days[3];
-
-  weekLabel.textContent = `${s.getFullYear()}.${pad(s.getMonth()+1)}.${pad(s.getDate())} ~ ${pad(e.getMonth()+1)}.${pad(e.getDate())}`;
-
-  weeklyThead.innerHTML = `<tr>
-    <th class="col-name">이름</th>
-    ${days.map((d, i) => `
-      <th class="${dateKey(d) === todayKey ? "th-today" : ""}">
-        ${DAY_KO[i]}<br>
-        <span style="font-weight:400;font-size:0.7rem">${pad(d.getMonth()+1)}/${pad(d.getDate())}</span>
-        ${ms === 2 ? `<br><span style="font-size:0.65rem;color:var(--text-muted)">1회/2회</span>` : ""}
-      </th>`).join("")}
-    <th class="col-count">출석수</th>
-  </tr>`;
-
-  if (!cachedMembers.length) {
-    weeklyTbody.innerHTML = `<tr><td colspan="${days.length + 2}" class="weekly-empty">등록된 인원이 없습니다.</td></tr>`;
-    return;
-  }
-
-  // logs 필드는 이미 cachedMembers에 있음 → 추가 읽기 없음
-  window._weeklyData = { days, DAY_KO, maxSessions: ms, rows: [] };
-
-  weeklyTbody.innerHTML = sortedMembers().map(m => {
-    const logs = m.logs || {};
-    let total  = 0;
-    const cells = days.map(d => {
-      const dk    = dateKey(d);
-      const count = logs[dk] || 0;
-      total += Math.min(count, ms);
-      const isToday = dk === todayKey;
-
-      let inner = "";
-      if (ms === 1) {
-        const on = count >= 1;
-        inner = `<span class="${on ? "att-o" : "att-x"} att-toggle"
-          data-id="${m.id}" data-dk="${dk}" data-count="${count}" data-ms="${ms}"
-          title="클릭하여 변경">${on ? "O" : "X"}</span>`;
-      } else {
-        const s1 = count >= 1, s2 = count >= 2;
-        inner = `<div style="display:flex;gap:3px;justify-content:center;">
-          <span class="${s1?"att-o":"att-x"} att-toggle" data-id="${m.id}" data-dk="${dk}" data-count="${count}" data-ms="${ms}" data-sess="1" title="1회차">${s1?"O":"X"}</span>
-          <span class="${s2?"att-o":"att-x"} att-toggle" data-id="${m.id}" data-dk="${dk}" data-count="${count}" data-ms="${ms}" data-sess="2" title="2회차">${s2?"O":"X"}</span>
-        </div>`;
-      }
-      return `<td class="${isToday ? "col-today" : ""}">${inner}</td>`;
-    }).join("");
-
-    window._weeklyData.rows.push({ name: m.name, logs, total, maxTotal: days.length * ms });
-    return `<tr>
-      <td class="col-name">${m.name}</td>
-      ${cells}
-      <td class="col-count">${total} / ${days.length * ms}</td>
-    </tr>`;
-  }).join("");
-
-  weeklyTbody.querySelectorAll(".att-toggle").forEach(el => {
-    el.addEventListener("click", () => toggleWeeklyCell(
-      el.dataset.id, el.dataset.dk,
-      Number(el.dataset.count), Number(el.dataset.ms),
-      Number(el.dataset.sess || 1)
-    ));
-  });
-}
-
-async function toggleWeeklyCell(memberId, dk, count, ms, sess) {
-  const member = cachedMembers.find(m => m.id === memberId);
-  if (!member) return;
-  const logs    = { ...(member.logs || {}) };
-  const todayKey = dateKey(new Date());
-
-  // 해당 회차가 이미 O면 하나 줄이고, X면 하나 늘림
-  const newCount = sess <= count ? count - 1 : count + 1;
-  if (newCount <= 0) delete logs[dk];
-  else logs[dk] = newCount;
-
-  const patch = { logs };
-  if (dk === todayKey) {
-    patch.present      = newCount > 0;
-    patch.sessionCount = newCount;
-  }
-  await updateDoc(doc(db, "members", memberId), patch);
-  // onSnapshot이 cachedMembers 갱신 → renderWeeklyTable 자동 호출
-}
-
-// ============================================================
-//  엑셀 다운로드
-// ============================================================
-$("btn-download-excel").addEventListener("click", () => {
-  const d = window._weeklyData;
-  if (!d) return;
-  buildCSV(d.days, d.DAY_KO, d.maxSessions, d.rows, weekLabel.textContent.replace(/\s/g,"_"));
-});
 
 function buildCSV(days, DAY_KO, ms, rows, fileName) {
   const dayHeaders = days.map((d, i) => {
@@ -661,8 +555,8 @@ function buildCSV(days, DAY_KO, ms, rows, fileName) {
     return [r.name, ...cells, `${r.total}/${r.maxTotal}`];
   });
 
-  const csv  = "\uFEFF" + [headers, ...csvRows].map(r => r.map(c => `"${c}"`).join(",")).join("\n");
-  const a    = Object.assign(document.createElement("a"), {
+  const csv = "\uFEFF" + [headers, ...csvRows].map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+  const a   = Object.assign(document.createElement("a"), {
     href:     URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" })),
     download: `${fileName}.csv`
   });

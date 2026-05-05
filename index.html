@@ -132,35 +132,16 @@
         </div>
       </section>
 
-      <!-- 주간 출석표 -->
-      <section class="panel panel-wide">
-        <h2 class="panel-title">주간 출석표</h2>
-
-        <!-- 주 이동 -->
-        <div class="week-nav">
-          <button id="btn-week-prev" class="btn btn-ghost btn-sm">‹ 이전</button>
-          <span id="week-label" class="week-label">로딩 중…</span>
-          <button id="btn-week-next" class="btn btn-ghost btn-sm">다음 ›</button>
-          <button id="btn-download-excel" class="btn btn-accent btn-sm">⬇ 이번 주</button>
+      <!-- 출석 데이터 다운로드 -->
+      <section class="panel">
+        <h2 class="panel-title">출석 데이터 다운로드</h2>
+        <div class="date-range-inputs">
+          <input type="date" id="excel-date-from" />
+          <span class="date-range-sep">~</span>
+          <input type="date" id="excel-date-to" />
         </div>
-
-        <!-- 날짜 범위 다운로드 -->
-        <div class="date-range-block">
-          <span class="date-range-label">📅 기간 다운로드</span>
-          <div class="date-range-inputs">
-            <input type="date" id="excel-date-from" />
-            <span class="date-range-sep">~</span>
-            <input type="date" id="excel-date-to" />
-          </div>
-          <button id="btn-download-range" class="btn btn-accent btn-sm" style="width:100%">⬇ 다운로드</button>
-        </div>
-
-        <div class="weekly-table-wrap">
-          <table id="weekly-table" class="weekly-table">
-            <thead id="weekly-thead"></thead>
-            <tbody id="weekly-tbody"></tbody>
-          </table>
-        </div>
+        <button id="btn-download-range" class="btn btn-accent">⬇ 엑셀 다운로드</button>
+        <div id="download-msg" class="msg-box hidden"></div>
       </section>
     </div>
   </div>
