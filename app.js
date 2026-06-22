@@ -116,9 +116,15 @@ async function handleAttend() {
   const member = cachedMembers.find(m => m.name === name);
   if (!member) return showMsg($("user-msg"), "등록된 이름이 아닙니다. 관리자에게 문의하세요.", "error");
 
+  // 현재 출석 상태가 true면 차단 (초기화 후에만 재출석 가능)
+  if (member.present) {
+    return showMsg($("user-msg"), "이미 출석 처리되었습니다. 관리자에게 문의하세요.", "info");
+  }
+
   const today      = dateKey();
   const logs       = member.logs || {};
-  const todayCount = logs[today] || 0;
+  const todayEntry = logs[today];
+  const todayCount = typeof todayEntry === "object" ? (todayEntry?.count || 0) : (todayEntry || 0);
 
   if (todayCount >= MAX_SESSIONS) {
     return showMsg($("user-msg"), `오늘 출석(${MAX_SESSIONS}회)을 모두 완료했습니다.`, "info");
@@ -128,7 +134,7 @@ async function handleAttend() {
   await updateDoc(doc(db, "members", member.id), {
     present:      true,
     sessionCount: newCount,
-    logs:         { ...logs, [today]: newCount },
+    logs:         { ...logs, [today]: { count: newCount, label: null } },
   });
 
   showMsg($("user-msg"), `✓ ${name} 님, 출석 완료! (${newCount}/${MAX_SESSIONS}회차)`, "success");
@@ -308,30 +314,69 @@ function renderMemberList() {
     return;
   }
 
-  $("member-list").innerHTML = list.map(m => `
-    <div class="member-row ${m.present ? "present" : ""}" draggable="${currentFilter === "all"}" data-id="${m.id}">
+  $("member-list").innerHTML = list.map(m => {
+    const todayLog   = (m.logs || {})[dateKey()];
+    const customLabel = todayLog?.label || null;
+    const isPresent  = m.present;
+
+    // 뱃지 상태: 출석 / 개인사정(커스텀) / 미출석
+    const badgeClass = isPresent ? (customLabel ? "custom" : "present") : "absent";
+    const badgeText  = isPresent ? (customLabel || "출석 ✓") : "미출석";
+
+    return `
+    <div class="member-row ${isPresent ? "present" : ""} ${customLabel ? "custom-state" : ""}"
+         draggable="${currentFilter === "all"}" data-id="${m.id}">
       <div class="member-info">
-        ${currentFilter === "all" ? `<span class="drag-handle" title="드래그로 순서 변경">⠿</span>` : ""}
+        ${currentFilter === "all" ? `<span class="drag-handle">⠿</span>` : ""}
         <div class="member-avatar">${m.name.charAt(0)}</div>
         <span class="member-name">${m.name}</span>
       </div>
       <div class="member-actions">
-        <span class="member-badge ${m.present ? "present" : "absent"} badge-toggle"
-              data-id="${m.id}" data-present="${m.present}"
-              title="클릭하여 출석 상태 변경">${m.present ? "출석 ✓" : "미출석"}</span>
+        <span class="member-badge ${badgeClass} badge-toggle"
+              data-id="${m.id}" data-present="${isPresent}"
+              title="꾹 눌러 커스텀 상태 설정">${badgeText}</span>
         <button class="btn-icon" data-info-id="${m.id}" data-info-name="${m.name}" title="출석 기록">📋</button>
         <button class="btn-icon" data-delete="${m.id}" data-name="${m.name}" title="삭제">✕</button>
       </div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 
+  // 삭제
   $("member-list").querySelectorAll("[data-delete]").forEach(b =>
     b.addEventListener("click", () => deleteMember(b.dataset.delete, b.dataset.name)));
 
-  $("member-list").querySelectorAll(".badge-toggle").forEach(b =>
-    b.addEventListener("click", e => { e.stopPropagation(); toggleTodayAttendance(b.dataset.id, b.dataset.present === "true"); }));
-
+  // 출석 기록 모달
   $("member-list").querySelectorAll("[data-info-id]").forEach(b =>
     b.addEventListener("click", e => { e.stopPropagation(); openLogModal(b.dataset.infoId, b.dataset.infoName); }));
+
+  // 뱃지 클릭 / 꾹 누르기
+  $("member-list").querySelectorAll(".badge-toggle").forEach(b => {
+    let pressTimer = null;
+
+    // 꾹 누르기 → 커스텀 라벨 입력
+    const startPress = () => {
+      pressTimer = setTimeout(() => {
+        pressTimer = null;
+        openCustomLabelModal(b.dataset.id);
+      }, 600);
+    };
+    const cancelPress = () => clearTimeout(pressTimer);
+
+    b.addEventListener("mousedown",  startPress);
+    b.addEventListener("touchstart", startPress, { passive: true });
+    b.addEventListener("mouseup",    cancelPress);
+    b.addEventListener("mouseleave", cancelPress);
+    b.addEventListener("touchend",   cancelPress);
+
+    // 짧게 클릭 → 출석 토글
+    b.addEventListener("click", e => {
+      e.stopPropagation();
+      if (pressTimer !== null) {
+        clearTimeout(pressTimer);
+        toggleTodayAttendance(b.dataset.id, b.dataset.present === "true");
+      }
+    });
+  });
 
   if (currentFilter === "all") attachDragEvents(list);
 }
@@ -345,7 +390,7 @@ function renderStats() {
 
 
 // ================================================================
-//  어드민 — 출석 토글 (뱃지 클릭)
+//  어드민 — 출석 토글 / 커스텀 라벨
 // ================================================================
 async function toggleTodayAttendance(memberId, isPresent) {
   const member = cachedMembers.find(m => m.id === memberId);
@@ -355,12 +400,77 @@ async function toggleTodayAttendance(memberId, isPresent) {
   const logs  = { ...(member.logs || {}) };
 
   if (isPresent) {
+    // 출석 → 미출석 (오늘 로그 삭제)
     delete logs[today];
     await updateDoc(doc(db, "members", memberId), { present: false, sessionCount: 0, logs });
   } else {
-    logs[today] = 1;
-    await updateDoc(doc(db, "members", memberId), { present: true, sessionCount: 1, logs });
+    // 미출석 → 출석
+    const prev  = logs[today] || {};
+    const count = (typeof prev === "object" ? prev.count : prev) || 0;
+    logs[today] = { count: count + 1, label: null };
+    await updateDoc(doc(db, "members", memberId), { present: true, sessionCount: count + 1, logs });
   }
+}
+
+/** 꾹 누르면 커스텀 라벨 입력 모달 */
+function openCustomLabelModal(memberId) {
+  const member    = cachedMembers.find(m => m.id === memberId);
+  if (!member) return;
+
+  const today    = dateKey();
+  const todayLog = (member.logs || {})[today];
+  const current  = todayLog?.label || "";
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-card" style="max-width:320px">
+      <div class="modal-header">
+        <div class="modal-title">${member.name} — 오늘 상태</div>
+        <button class="btn-icon modal-close">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:10px;padding-top:4px">
+        <p style="font-size:0.85rem;color:var(--text-sub)">빈칸으로 저장하면 일반 출석으로 표시됩니다.</p>
+        <input type="text" id="custom-label-input" placeholder="예) 개인사정, 공결, 병결"
+               value="${current}" maxlength="10"
+               style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:0.95rem;background:var(--bg3);color:var(--text);outline:none" />
+        <div style="display:flex;gap:8px">
+          <button id="custom-label-save" class="btn btn-primary" style="flex:1">저장</button>
+          <button id="custom-label-clear" class="btn btn-ghost btn-sm">초기화</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add("active"));
+
+  const close = () => { overlay.classList.remove("active"); setTimeout(() => overlay.remove(), 220); };
+  overlay.querySelector(".modal-close").addEventListener("click", close);
+  overlay.addEventListener("click", e => { if (e.target === overlay) close(); });
+
+  // 저장 — 라벨만 바꾸고 present/count는 유지
+  overlay.querySelector("#custom-label-save").addEventListener("click", async () => {
+    const label = overlay.querySelector("#custom-label-input").value.trim();
+    const logs  = { ...(member.logs || {}) };
+    const prev  = logs[today] || {};
+    const count = typeof prev === "object" ? (prev.count || 1) : (prev || 1);
+    logs[today] = { count, label: label || null };
+    // present는 그대로 유지
+    await updateDoc(doc(db, "members", memberId), { logs });
+    close();
+  });
+
+  // 초기화 — 라벨 제거
+  overlay.querySelector("#custom-label-clear").addEventListener("click", async () => {
+    const logs = { ...(member.logs || {}) };
+    const prev = logs[today] || {};
+    const count = typeof prev === "object" ? (prev.count || 1) : (prev || 1);
+    logs[today] = { count, label: null };
+    await updateDoc(doc(db, "members", memberId), { logs });
+    close();
+  });
+
+  setTimeout(() => overlay.querySelector("#custom-label-input").focus(), 100);
 }
 
 
@@ -371,14 +481,18 @@ function openLogModal(memberId, memberName) {
   const logs    = cachedMembers.find(m => m.id === memberId)?.logs || {};
   const entries = Object.entries(logs).sort((a, b) => b[0].localeCompare(a[0]));
 
+  const getCount = v => typeof v === "object" ? (v?.count || 0) : (v || 0);
+  const getLabel = v => typeof v === "object" ? (v?.label || null) : null;
+
   const tableHTML = entries.length
     ? `<table class="log-table">
-        <thead><tr><th>#</th><th>날짜</th><th>횟수</th></tr></thead>
-        <tbody>${entries.map(([date, cnt], i) => `
+        <thead><tr><th>#</th><th>날짜</th><th>횟수</th><th>상태</th></tr></thead>
+        <tbody>${entries.map(([date, val], i) => `
           <tr>
             <td class="log-num">${entries.length - i}</td>
             <td class="log-date">${date}</td>
-            <td class="log-num">${cnt}회</td>
+            <td class="log-num">${getCount(val)}회</td>
+            <td class="log-num">${getLabel(val) || "—"}</td>
           </tr>`).join("")}
         </tbody>
       </table>`
@@ -509,9 +623,14 @@ async function downloadCSV(from, to, btn, msgEl) {
     const logs  = m.logs || {};
     let   total = 0;
     const cells = days.flatMap(d => {
-      const count = logs[dateKey(d)] || 0;
+      const entry = logs[dateKey(d)];
+      const count = typeof entry === "object" ? (entry?.count || 0) : (entry || 0);
+      const label = typeof entry === "object" ? (entry?.label || null) : null;
       total += Math.min(count, MAX_SESSIONS);
-      return [`${count >= 1 ? "O" : "X"}`, `${count >= 2 ? "O" : "X"}`];
+      // O/X 대신 커스텀 라벨이 있으면 해당 텍스트로
+      const cell1 = count >= 1 ? (label || "O") : "X";
+      const cell2 = count >= 2 ? (label || "O") : "X";
+      return [cell1, cell2];
     });
     return [m.name, ...cells, `${total}/${days.length * MAX_SESSIONS}`];
   });

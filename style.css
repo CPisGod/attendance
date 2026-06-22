@@ -489,6 +489,16 @@ textarea::placeholder { color: var(--text-muted); }
 }
 .member-badge.present { background: var(--accent2-light); color: #065f46; border: 1px solid #6ee7b7; }
 .member-badge.absent  { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); }
+.member-badge.custom  {
+  background: #fef9ec;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
+.member-row.custom-state {
+  border-color: #fcd34d;
+  background: #fffdf0;
+}
 
 .member-actions { display: flex; align-items: center; gap: 8px; }
 
