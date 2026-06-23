@@ -245,15 +245,12 @@ async function deleteMember(id, name) {
   await deleteDoc(doc(db, "members", id));
 }
 
-// 오늘 출석 전체 초기화
+// 오늘 출석 전체 초기화 — present만 false로, logs는 유지
 $("btn-reset-attendance").addEventListener("click", async () => {
-  if (!confirm("오늘 출석을 모두 초기화할까요?")) return;
-  const today = dateKey();
+  if (!confirm("오늘 출석을 초기화할까요? (출석 횟수 기록은 유지됩니다)")) return;
   const batch = writeBatch(db);
   cachedMembers.forEach(m => {
-    const logs = { ...(m.logs || {}) };
-    delete logs[today];
-    batch.update(doc(db, "members", m.id), { present: false, sessionCount: 0, logs });
+    batch.update(doc(db, "members", m.id), { present: false, sessionCount: m.sessionCount ?? 0 });
   });
   await batch.commit();
   showMsg($("member-msg"), "출석이 초기화되었습니다.", "info");
@@ -611,15 +608,26 @@ async function downloadCSV(from, to, btn, msgEl) {
     return showMsg(msgEl, "선택 기간에 월~목이 없습니다.", "error");
   }
 
+  // Firestore에서 최신 데이터 직접 조회 (캐시 사용 X)
+  const snap    = await getDocs(MEMBERS_COL);
+  const members = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const sorted  = [...members].sort((a, b) => {
+    const diff = (a.order ?? 999) - (b.order ?? 999);
+    return diff !== 0 ? diff : a.name.localeCompare(b.name, "ko");
+  });
+
   // 헤더
   const headers = [
     "이름",
-    ...days.flatMap((d, i) => [`${dayNames[i]} ${pad(d.getMonth()+1)}/${pad(d.getDate())} 1회`, `${dayNames[i]} ${pad(d.getMonth()+1)}/${pad(d.getDate())} 2회`]),
+    ...days.flatMap((d, i) => [
+      `${dayNames[i]} ${pad(d.getMonth()+1)}/${pad(d.getDate())} 1회`,
+      `${dayNames[i]} ${pad(d.getMonth()+1)}/${pad(d.getDate())} 2회`,
+    ]),
     "출석수",
   ];
 
   // 데이터 행
-  const csvRows = sortedMembers().map(m => {
+  const csvRows = sorted.map(m => {
     const logs  = m.logs || {};
     let   total = 0;
     const cells = days.flatMap(d => {
@@ -627,7 +635,6 @@ async function downloadCSV(from, to, btn, msgEl) {
       const count = typeof entry === "object" ? (entry?.count || 0) : (entry || 0);
       const label = typeof entry === "object" ? (entry?.label || null) : null;
       total += Math.min(count, MAX_SESSIONS);
-      // O/X 대신 커스텀 라벨이 있으면 해당 텍스트로
       const cell1 = count >= 1 ? (label || "O") : "X";
       const cell2 = count >= 2 ? (label || "O") : "X";
       return [cell1, cell2];
@@ -635,7 +642,7 @@ async function downloadCSV(from, to, btn, msgEl) {
     return [m.name, ...cells, `${total}/${days.length * MAX_SESSIONS}`];
   });
 
-  // CSV 파일 생성 및 다운로드
+  // CSV 생성 및 다운로드
   const csv  = "\uFEFF" + [headers, ...csvRows].map(row => row.map(c => `"${c}"`).join(",")).join("\n");
   const link = Object.assign(document.createElement("a"), {
     href:     URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" })),
